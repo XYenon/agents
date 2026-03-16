@@ -2,8 +2,8 @@
 name: kitty
 description: Instructions for using kitty remote control to spawn windows/tabs, send text, inspect output, and manage processes. Useful for running servers or long-running tasks in the background.
 allowed-tools:
-  - Bash(kitten @:*)
-  - Bash(echo:*)
+  - Bash(kitten @ *)
+  - Bash(echo *)
 ---
 
 # Kitty Remote Control Skill
