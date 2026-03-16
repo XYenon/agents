@@ -2,7 +2,7 @@
 name: searxng-search
 description: "Search the web using a self-hosted SearXNG instance. Use when users ask to search with SearXNG, or when web search is needed and a SearXNG instance is configured. Supports categories, engines, time range, and language filters."
 allowed-tools:
-  - Bash(python3:*)
+  - Bash(python3 scripts/*)
 ---
 
 # SearXNG Search Skill
@@ -100,9 +100,17 @@ python3 scripts/search.py -e google,duckduckgo -p 2 "rust programming"
 python3 scripts/search.py -l zh-CN -n 10 "开源搜索引擎"
 ```
 
+## Best Practices
+
+- **Technical topics** (programming, software, science, IT, etc.): Always use **English** as both the query language and search language (`-l en`), regardless of the user's input language. Translate the query to English if needed. English results are more comprehensive and up-to-date for technical content.
+- **Chinese lifestyle topics** (food, travel, shopping, local services, social trends, etc.): In addition to the default search, run a **second search** with `-e baidu,sogou -l zh-CN` using a Chinese query to capture China-specific results. Merge and deduplicate results before presenting to the user.
+
 ## Workflow
 
 1. User asks to search for something
-2. Run `scripts/search.py` with the query and any relevant filters
-3. Present results to the user in a readable format
-4. If user wants more results, use `-p` for pagination or `-n` for more per page
+2. Determine the topic type:
+   - **Technical**: translate query to English if needed, search with `-l en`
+   - **Chinese lifestyle**: run the default search first, then an additional search with `-e baidu,sogou -l zh-CN`
+3. Run `scripts/search.py` with the query and any relevant filters
+4. Present results to the user in a readable format
+5. If user wants more results, use `-p` for pagination or `-n` for more per page
