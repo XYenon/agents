@@ -9,63 +9,22 @@ allowed-tools:
 
 Search the web using a SearXNG instance via its API.
 
-## Configuration
+## Configuration issues
 
-The config file is read from `$XDG_CONFIG_HOME/agents/searxng.toml` (defaults to `~/.config/agents/searxng.toml`).
-If the TOML file does not exist, the skill falls back to the legacy JSON config at
-`$XDG_CONFIG_HOME/agents/searxng.json` for backward compatibility.
+This skill depends on a local SearXNG config file. Keep setup details out of this
+file and load [references/configuration.md](references/configuration.md) only when needed.
 
-### Config fields
+If `scripts/search.py` reports configuration, auth, or instance setup errors,
+read [references/configuration.md](references/configuration.md) before retrying. Common examples include:
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `base_url` | `string` | **Yes** | SearXNG instance URL (no trailing slash) |
-| `auth` | `object` | No | Auth config object (see below) |
-| `auth.type` | `string` | If auth | `"bearer"` or `"basic"` |
-| `auth.token` | `string` | If bearer | Bearer token value (supports `$ENV_VAR`) |
-| `auth.user` | `string` | If basic | Basic auth username |
-| `auth.pass` | `string` | If basic | Basic auth password |
-| `headers` | `object` | No | Key-value pairs of additional HTTP headers |
-| `default_language` | `string` | No | Default language code (e.g. `"en"`, `"zh-CN"`) |
-| `default_categories` | `string[]` | No | Default categories (e.g. `["general", "news"]`) |
-| `default_engines` | `string[]` | No | Default engines (e.g. `["google", "duckduckgo"]`) |
-| `default_safesearch` | `number` | No | Default safe search level: `0`, `1`, `2` |
-| `default_time_range` | `string` | No | Default time range: `"day"`, `"month"`, `"year"` |
-| `default_max_results` | `number` | No | Max results to display (default: `5`) |
-| `timeout` | `number` | No | Request timeout in seconds (default: `30`) |
-
-### Example config (TOML, Bearer auth)
-
-```toml
-base_url = "https://searx.example.com"
-default_categories = ["general"]
-default_engines = ["google", "duckduckgo", "brave"]
-default_max_results = 10
-
-[auth]
-type = "bearer"
-token = "your-token-here"
-
-[headers]
-X-Custom-Header = "value"
-```
-
-### Example config (TOML, Basic auth)
-
-```toml
-base_url = "https://searx.example.com"
-default_safesearch = 1
-
-[auth]
-type = "basic"
-user = "admin"
-pass = "password"
-```
-
-### Legacy JSON fallback
-
-If `searxng.toml` is absent, the skill still supports the old
-`~/.config/agents/searxng.json` format.
+- `ERROR: Config file not found`
+- `ERROR: Invalid TOML ...` / `ERROR: Invalid JSON ...`
+- `ERROR: base_url is required`
+- `ERROR: Environment variable ... is not set`
+- `ERROR: auth.token required for bearer auth`
+- `ERROR: auth.user and auth.pass required for basic auth`
+- `ERROR: Unknown auth.type ...`
+- `ERROR: HTTP 401` / `ERROR: HTTP 403`
 
 ## Usage
 
