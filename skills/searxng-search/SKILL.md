@@ -11,7 +11,9 @@ Search the web using a SearXNG instance via its API.
 
 ## Configuration
 
-The config file is read from `$XDG_CONFIG_HOME/agents/searxng.json` (defaults to `~/.config/agents/searxng.json`).
+The config file is read from `$XDG_CONFIG_HOME/agents/searxng.toml` (defaults to `~/.config/agents/searxng.toml`).
+If the TOML file does not exist, the skill falls back to the legacy JSON config at
+`$XDG_CONFIG_HOME/agents/searxng.json` for backward compatibility.
 
 ### Config fields
 
@@ -32,37 +34,38 @@ The config file is read from `$XDG_CONFIG_HOME/agents/searxng.json` (defaults to
 | `default_max_results` | `number` | No | Max results to display (default: `5`) |
 | `timeout` | `number` | No | Request timeout in seconds (default: `30`) |
 
-### Example config (Bearer auth)
+### Example config (TOML, Bearer auth)
 
-```json
-{
-  "base_url": "https://searx.example.com",
-  "auth": {
-    "type": "bearer",
-    "token": "your-token-here"
-  },
-  "default_categories": ["general"],
-  "default_engines": ["google", "duckduckgo", "brave"],
-  "default_max_results": 10,
-  "headers": {
-    "X-Custom-Header": "value"
-  }
-}
+```toml
+base_url = "https://searx.example.com"
+default_categories = ["general"]
+default_engines = ["google", "duckduckgo", "brave"]
+default_max_results = 10
+
+[auth]
+type = "bearer"
+token = "your-token-here"
+
+[headers]
+X-Custom-Header = "value"
 ```
 
-### Example config (Basic auth)
+### Example config (TOML, Basic auth)
 
-```json
-{
-  "base_url": "https://searx.example.com",
-  "auth": {
-    "type": "basic",
-    "user": "admin",
-    "pass": "password"
-  },
-  "default_safesearch": 1
-}
+```toml
+base_url = "https://searx.example.com"
+default_safesearch = 1
+
+[auth]
+type = "basic"
+user = "admin"
+pass = "password"
 ```
+
+### Legacy JSON fallback
+
+If `searxng.toml` is absent, the skill still supports the old
+`~/.config/agents/searxng.json` format.
 
 ## Usage
 

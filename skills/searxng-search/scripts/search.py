@@ -2,29 +2,61 @@
 """SearXNG Search Script - Search the web via a SearXNG instance."""
 
 import argparse
+import base64
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
-import base64
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    tomllib = None
 
 
 def load_config():
     config_dir = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    config_file = os.path.join(config_dir, "agents", "searxng.json")
+    config_dir = os.path.join(config_dir, "agents")
+    toml_file = os.path.join(config_dir, "searxng.toml")
+    json_file = os.path.join(config_dir, "searxng.json")
 
-    if not os.path.isfile(config_file):
-        print(f"ERROR: Config file not found: {config_file}", file=sys.stderr)
+    if os.path.isfile(toml_file):
+        config_file = toml_file
+        if tomllib is None:
+            print(
+                f"ERROR: TOML config found at {config_file}, but this Python does not support TOML.",
+                file=sys.stderr,
+            )
+            print("Upgrade to Python 3.11+ or remove the TOML config to use legacy JSON fallback.", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            with open(config_file, "rb") as f:
+                config = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            print(f"ERROR: Invalid TOML in {config_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif os.path.isfile(json_file):
+        config_file = json_file
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: Invalid JSON in {config_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"ERROR: Config file not found: {toml_file}", file=sys.stderr)
         print(
-            'Create it with at minimum: {"base_url": "https://your-searxng-instance.com"}',
+            f"Legacy JSON fallback path: {json_file}",
+            file=sys.stderr,
+        )
+        print(
+            'Create TOML config with at minimum: base_url = "https://your-searxng-instance.com"',
             file=sys.stderr,
         )
         sys.exit(1)
-
-    with open(config_file) as f:
-        config = json.load(f)
 
     if not config.get("base_url"):
         print(f"ERROR: base_url is required in {config_file}", file=sys.stderr)
