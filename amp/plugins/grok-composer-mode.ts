@@ -1,4 +1,6 @@
 import type { PluginAPI } from '@ampcode/plugin'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 
 const FABLE_AGENT_PROMPT = `
 You are pair programming with a user to solve their coding task. Your main goal is to follow the user's instructions and verify that the result works.
@@ -99,27 +101,303 @@ For example, if the user asks for a link to \`~/src/app/routes/(app)/threads/+pa
 `
 
 const SMART_TOOL_NAMES = [
-	'Bash',
+	// 'Bash',
 	'chart',
 	'create_file',
+	// 'Delete',
+	// 'Edit',
 	'edit_file',
 	'find_thread',
 	'finder',
+	'Glob',
+	// 'Grep',
 	'librarian',
+	// 'LS',
 	'oracle',
 	'painter',
 	'Read',
 	'read_mcp_resource',
 	'read_thread',
 	'read_web_page',
+	// 'Shell',
+	'StrReplace',
+	'shell_command',
+	'shell_command_status',
 	'skill',
 	// 'Task',
 	'view_media',
+	// 'WebSearch',
+	// 'Write',
 	'web_search',
 ] as const
 
 
+function firstString(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === 'string' && value.trim()) return value
+	}
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+	for (const value of values) {
+		if (typeof value === 'number' && Number.isFinite(value)) return value
+		if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+	}
+}
+
+function objectFromCursorArgs(value: unknown): Record<string, unknown> {
+	if (!value) return {}
+	if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+	if (typeof value !== 'string') return {}
+	const trimmed = value.trim()
+	if (!trimmed) return {}
+	try {
+		const parsed = JSON.parse(trimmed)
+		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+	} catch {
+		// Treat plain strings as the primary value; each wrapper decides how to use it.
+	}
+	return { value: trimmed }
+}
+
+function workspacePath(amp: PluginAPI, requestedPath: string): string {
+	const workspaceRoot = amp.system.workspaceRoot
+	if (!workspaceRoot) throw new Error('No workspace is open.')
+	const workspace = amp.helpers.filePathFromURI(workspaceRoot)
+	const resolved = isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(workspace, requestedPath)
+	const relativePath = relative(workspace, resolved)
+	if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+		throw new Error(`Refusing to operate outside the workspace: ${requestedPath}`)
+	}
+	return resolved
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+async function runWorkspaceCommand(amp: PluginAPI, command: string) {
+	const workspaceRoot = amp.system.workspaceRoot
+	if (!workspaceRoot) throw new Error('No workspace is open.')
+	const cwd = amp.helpers.filePathFromURI(workspaceRoot)
+	try {
+		return await amp.$`sh -lc ${`cd ${shellQuote(cwd)} && ${command}`}`
+	} catch (error) {
+		const result = error as { exitCode?: number; stdout?: string; stderr?: string }
+		return {
+			exitCode: result.exitCode ?? 1,
+			stdout: result.stdout ?? '',
+			stderr: result.stderr ?? (error instanceof Error ? error.message : String(error)),
+		}
+	}
+}
+
+function registerCursorToolWrappers(amp: PluginAPI) {
+	const register = (definition: Parameters<PluginAPI['registerTool']>[0]) => {
+		try {
+			amp.registerTool(definition)
+		} catch (error) {
+			amp.logger.log(`Skipping ${definition.name} wrapper: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	register({
+		name: 'Shell',
+		description: 'Cursor/Grok CLI compatibility wrapper for the existing shell capability. Executes command/cmd in the current workspace.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				command: { type: 'string', description: 'Shell command to execute.' },
+				cmd: { type: 'string', description: 'Alias for command.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const command = firstString(params.command, params.cmd, params.value)
+			if (!command) return 'Error: Shell requires command or cmd.'
+			const result = await runWorkspaceCommand(amp, command)
+			return [`exitCode: ${result.exitCode}`, result.stdout, result.stderr].filter(Boolean).join('\n')
+		},
+	})
+
+	register({
+		name: 'LS',
+		description: 'Cursor/Grok CLI compatibility wrapper for listing workspace files. Prefer the native Read tool for file contents.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Directory path to list.' },
+				dir_path: { type: 'string', description: 'Alias for path.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const requestedPath = firstString(params.path, params.dir_path, params.value) ?? '.'
+			const path = workspacePath(amp, requestedPath)
+			const result = await runWorkspaceCommand(amp, `ls -la ${shellQuote(path)}`)
+			return result.stdout || result.stderr || `exitCode: ${result.exitCode}`
+		},
+	})
+
+	register({
+		name: 'Grep',
+		description: 'Cursor/Grok CLI compatibility wrapper over ripgrep in the workspace. Accepts pattern/query plus optional path/include and limit.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				pattern: { type: 'string', description: 'Regex or literal pattern to search for.' },
+				query: { type: 'string', description: 'Alias for pattern.' },
+				path: { type: 'string', description: 'Directory or file to search.' },
+				include: { type: 'string', description: 'Glob filter, e.g. *.ts.' },
+				limit: { type: 'number', description: 'Maximum matches to return.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const pattern = firstString(params.pattern, params.query, params.regex, params.substring, params.value)
+			if (!pattern) return 'Error: Grep requires pattern or query.'
+			const requestedPath = firstString(params.path, params.file_path) ?? '.'
+			const limit = Math.min(firstNumber(params.limit, params.max_results) ?? 1000, 1000)
+			const include = firstString(params.include, params.glob, params.glob_filter, params.globPattern)
+			const literal = params.literal === true
+			const ignoreCase = params.ignoreCase === true || params.ignore_case === true
+			const flags = ['--line-number', '--no-heading', '--color=never', `--max-count ${Math.max(1, limit)}`]
+			if (literal) flags.push('--fixed-strings')
+			if (ignoreCase) flags.push('--ignore-case')
+			if (include) flags.push(`--glob ${shellQuote(include)}`)
+			const result = await runWorkspaceCommand(amp, `rg ${flags.join(' ')} -- ${shellQuote(pattern)} ${shellQuote(workspacePath(amp, requestedPath))}`)
+			return result.stdout || (result.exitCode === 1 ? 'No matches found.' : result.stderr || `exitCode: ${result.exitCode}`)
+		},
+	})
+
+	register({
+		name: 'Glob',
+		description: 'Cursor/Grok CLI compatibility wrapper over the existing workspace shell. Finds files matching a glob pattern.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				pattern: { type: 'string', description: 'Glob pattern to find.' },
+				glob: { type: 'string', description: 'Alias for pattern.' },
+				path: { type: 'string', description: 'Base directory.' },
+				limit: { type: 'number', description: 'Maximum files to return.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const pattern = firstString(params.pattern, params.glob, params.globPattern, params.value)
+			if (!pattern) return 'Error: Glob requires pattern or glob.'
+			const requestedPath = firstString(params.path, params.cwd) ?? '.'
+			const limit = Math.min(firstNumber(params.limit, params.max_results) ?? 1000, 1000)
+			const result = await runWorkspaceCommand(amp, `find ${shellQuote(workspacePath(amp, requestedPath))} -path '*/.git' -prune -o -path '*/node_modules' -prune -o -name ${shellQuote(pattern)} -print | head -n ${Math.max(1, limit)}`)
+			return result.stdout || result.stderr || 'No files found.'
+		},
+	})
+
+	const registerEditWrapper = (name: 'Edit' | 'StrReplace') => register({
+		name,
+		description: `Cursor/Grok CLI compatibility wrapper for the existing edit capability. Replaces old_string/oldText with new_string/newText in a workspace file.`,
+		inputSchema: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'File path to edit.' },
+				file_path: { type: 'string', description: 'Alias for path.' },
+				old_string: { type: 'string', description: 'Text to replace.' },
+				new_string: { type: 'string', description: 'Replacement text.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const requestedPath = firstString(params.path, params.file_path, params.filePath, params.target_file, params.targetFile)
+			const oldText = firstString(params.old_string, params.oldText, params.old_text)
+			const newText = firstString(params.new_string, params.newText, params.new_text) ?? ''
+			if (!requestedPath || oldText === undefined) return `Error: ${name} requires path/file_path and old_string.`
+			const path = workspacePath(amp, requestedPath)
+			const original = await readFile(path, 'utf8')
+			if (!original.includes(oldText)) return `Error: old_string was not found in ${requestedPath}.`
+			const next = original.replace(oldText, newText)
+			await writeFile(path, next, 'utf8')
+			return `Updated ${requestedPath}.`
+		},
+	})
+
+	registerEditWrapper('Edit')
+	registerEditWrapper('StrReplace')
+
+	register({
+		name: 'Write',
+		description: 'Cursor/Grok CLI compatibility wrapper for file creation/update in the workspace. Prefer create_file/edit_file for normal Amp calls.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'File path to write.' },
+				file_path: { type: 'string', description: 'Alias for path.' },
+				content: { type: 'string', description: 'File content.' },
+				contents: { type: 'string', description: 'Alias for content.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const requestedPath = firstString(params.path, params.file_path, params.filePath, params.target_file, params.targetFile)
+			const content = firstString(params.content, params.contents, params.text, params.value) ?? ''
+			if (!requestedPath) return 'Error: Write requires path or file_path.'
+			const path = workspacePath(amp, requestedPath)
+			await mkdir(dirname(path), { recursive: true })
+			await writeFile(path, content, 'utf8')
+			return `Wrote ${requestedPath}.`
+		},
+	})
+
+	register({
+		name: 'Delete',
+		description: 'Cursor/Grok CLI compatibility wrapper for deleting a workspace file or directory.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Path to delete.' },
+				file_path: { type: 'string', description: 'Alias for path.' },
+				recursive: { type: 'boolean', description: 'Allow recursive directory deletion.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const requestedPath = firstString(params.path, params.file_path, params.filePath, params.target_file, params.targetFile, params.value)
+			if (!requestedPath) return 'Error: Delete requires path or file_path.'
+			await rm(workspacePath(amp, requestedPath), { recursive: params.recursive === true, force: false })
+			return `Deleted ${requestedPath}.`
+		},
+	})
+
+	register({
+		name: 'WebSearch',
+		description: 'Cursor/Grok CLI compatibility wrapper. Prefer the native web_search tool; this wrapper turns query/search_term into a web_search-ready objective.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				query: { type: 'string', description: 'Search query.' },
+				search_term: { type: 'string', description: 'Alias for query.' },
+			},
+			required: [],
+		},
+		async execute(input) {
+			const params = objectFromCursorArgs(input)
+			const query = firstString(params.query, params.search_term, params.value)
+			if (!query) return 'Error: WebSearch requires query or search_term.'
+			return `Use the native web_search tool with objective: ${query}`
+		},
+	})
+}
+
+
 export default function (amp: PluginAPI) {
+	registerCursorToolWrappers(amp)
+
 	const agent = amp.createAgent({
 		name: 'composer-2.5',
 		model: 'xai/grok-composer-2.5-fast',
