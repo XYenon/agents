@@ -1,5 +1,7 @@
 # Global Agent Guidelines
 
+- **Machine-Local Overrides**: Each machine has its own @AGENTS.local.md (git-ignored, never synced) that overrides this file on conflict. Proactively record reusable machine-specific knowledge (quirks, layout, solved problems) there without asking; create the file if missing.
+
 - **Tool Use**:
   - When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)
   - When searching for files, prefer using `fd` instead of `find` because `fd` is faster and has a simpler interface. (If the `fd` command is not found, then use alternatives.)
