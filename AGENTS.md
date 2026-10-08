@@ -1,6 +1,8 @@
 # Global Agent Guidelines
 
 - **Machine-Local Overrides**: Each machine has its own @AGENTS.local.md (git-ignored, never synced) that overrides this file on conflict. Proactively record reusable machine-specific knowledge (quirks, layout, solved problems) there without asking; create the file if missing.
+  - Only record knowledge tied to the current runtime environment (this machine's OS, apps, system config, network, toolchain installs, paths, and similar).
+  - Do NOT record knowledge that is strongly tied to a specific project (its code, build, tests, architecture, or conventions). Keep that in the relevant project's own docs or AGENTS.md instead.
 
 - **Tool Use**:
   - When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)
